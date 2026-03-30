@@ -29,7 +29,10 @@ class TestMigrations:
             ).fetchall()
         }
         conn.close()
-        assert tables == {"auth_tokens", "sync_log", "song_cache", "playlist_state"}
+        assert tables == {
+            "auth_tokens", "sync_log", "song_cache", "playlist_state",
+            "migration_jobs", "migration_tracks"
+        }
 
     def test_indexes_created(self, db_path):
         conn = sqlite3.connect(db_path)

@@ -5,7 +5,7 @@ import json
 import os
 import tempfile
 
-from ytmusicapi import YTMusic
+from ytmusicapi import YTMusic, OAuthCredentials
 
 from db.queries import upsert_auth_token, get_auth_token
 from utils.logging import get_logger
@@ -63,16 +63,27 @@ def store_youtube_token(
 def _client_from_json_str(oauth_json_str: str) -> YTMusic | None:
     """Create a YTMusic client from an oauth.json string."""
     try:
-        # ytmusicapi requires a file path, so write to a temp file
+        client_id = os.environ.get("YT_CLIENT_ID")
+        client_secret = os.environ.get("YT_CLIENT_SECRET")
+
+        if not client_id or not client_secret:
+            log.error("YT_CLIENT_ID or YT_CLIENT_SECRET not set")
+            return None
+
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".json", delete=False
         ) as f:
             f.write(oauth_json_str)
             tmp_path = f.name
 
-        client = YTMusic(tmp_path)
+        client = YTMusic(
+            tmp_path,
+            oauth_credentials=OAuthCredentials(
+                client_id=client_id,
+                client_secret=client_secret,
+            ),
+        )
 
-        # Clean up temp file
         try:
             os.unlink(tmp_path)
         except OSError:
