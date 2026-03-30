@@ -57,25 +57,36 @@ Open the new `.env` file and fill in your details:
 - **Spotify Details:** Create an app on the [Spotify Developer Dashboard](https://developer.spotify.com/) to get your `Client ID` and `Client Secret`.
 - **Playlist IDs:** The unique links of the playlists you want to sync.
 
-### 3. Connect to YouTube Music
-Run this command to allow the app to talk to your YouTube Music account:
+### 3. Authenticate
+Use the interactive CLI to connect both your Spotify and YouTube Music accounts. Just run:
 ```bash
-python -m ytmusicapi oauth
+python cli.py auth
 ```
-A browser window will open. Sign in with your Google account. This will create a tiny file called `oauth.json`.
+Follow the simple prompts in your terminal to complete the setup!
 
-*(Note: The app needs this file converted into text format called Base64. You can convert it and paste the text into your `.env` file under `YT_OAUTH_JSON`.)*
+### 4. Use CrossPlay!
+The CLI gives you a few powerful commands to run:
 
-### 4. Start the Magic!
-Now, bring the app to life:
+**Start the Background Sync Daemon**
+To keep things constantly synced in the background (by default, every 3 minutes):
 ```bash
-python main.py
+python cli.py daemon
 ```
 
-Finally, open your web browser and go to this link to connect your Spotify account:
-👉 `http://localhost:8888/auth/spotify`
+**Perform a One-Off Sync**
+```bash
+python cli.py sync
+```
 
-**That's it! 🎉** Your playlists will now automatically check for new songs every 3 minutes.
+**Migrate a Public Playlist**
+Easily migrate any public playlist to Spotify or YouTube Music with a beautiful live progress bar:
+```bash
+# Migrate to Spotify
+python cli.py migrate "https://music.youtube.com/playlist?list=..." --to spotify
+
+# Migrate to YouTube Music
+python cli.py migrate "https://open.spotify.com/playlist/..." --to youtube_music
+```
 
 ---
 

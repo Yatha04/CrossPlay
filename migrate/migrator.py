@@ -67,6 +67,7 @@ def run_migration(
     client_id: str,
     client_secret: str,
     fuzzy_threshold: int = 85,
+    progress_callback=None,
 ) -> MigrationResult:
     """Run a full playlist migration synchronously.
 
@@ -146,6 +147,9 @@ def run_migration(
             matched_tracks=result.matched,
             failed_tracks=result.failed,
         )
+
+        if progress_callback:
+            progress_callback(track_status)
 
     # --- Step 6: Finalize ---
     result.status = "completed"
