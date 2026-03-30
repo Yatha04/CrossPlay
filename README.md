@@ -1,133 +1,85 @@
-# CrossPlay
+# 🎵 CrossPlay
 
-Bidirectional YouTube Music ↔ Spotify playlist sync. Add a song on one platform, it shows up on the other within minutes. After a one-time OAuth setup, it runs autonomously in the background.
+Welcome to CrossPlay! This app lets you sync playlists across spotify and youtube music seamlessly. I made this app becuase I wanted to have a shared playlist with someone on a different platform. This does the job pretty well. You can also use this app to migrate playlists from one platform to another.
 
-## How It Works
+When you add a new song to your playlist on Spotify, it automatically appears on YouTube Music within a few minutes—and vice versa! You only need to set it up once, and then it quietly does its magic in the background.
 
+
+## 🌟 How it works
+
+Imagine you have a playlist on Spotify and another one on YouTube Music. CrossPlay acts as an invisible bridge between them.
+
+```mermaid
+flowchart LR
+    Spotify[Spotify Playlist]
+    YTM[YouTube Music Playlist]
+    CrossPlay((CrossPlay Magic ✨))
+    
+    Spotify -->|New song added| CrossPlay
+    YTM -->|New song added| CrossPlay
+    CrossPlay -->|Updates| Spotify
+    CrossPlay -->|Updates| YTM
 ```
-Poller (3-min interval)
-  ├── Spotify: snapshot_id change detection
-  └── YouTube Music: full playlist diff
-        │
-        ▼
-Matcher (5-tier resolution)
-  ISRC → exact artist+title → fuzzy match → duration check → skip+log
-        │
-        ▼
-Writer
-  Adds matched track to target playlist, logs to sync_log (dedup)
-```
 
-- **Add-only sync** — removals are not propagated
-- **Idempotent** — sync_log prevents duplicates and infinite echo loops
-- **Cheap** — ~480 API calls/day per platform, well within free tiers
+- **Two-way Sync:** Add a song on one platform, and it pops up on the other.
+- **Add-only:** If you delete a song, it won't delete it on the other side. This keeps your music safe from accidental deletions!
+- **Smart Matching:** It searches for the exact song. If it can't find it easily, it tries really hard using the artist name, song title, and track length to find the best match.
+- **No Duplicates:** It remembers what it has already synced, so it will never add the same song twice.
 
-## Prerequisites
+## 🛠️ What do you need?
 
-- Python 3.11+
-- A [Spotify Developer](https://developer.spotify.com/) app (Premium account required for the app owner)
-- A [Google Cloud](https://console.cloud.google.com/) project with YouTube Data API v3 enabled
+To get started, you'll need:
+- A computer with Python installed (version 3.11 or newer).
+- A Spotify Premium account (needed to create a connection).
+- A Google account (for YouTube Music).
 
-## Setup
+## 🚀 Step-by-Step Setup
 
-### 1. Clone and install
+Follow these steps to get everything running!
 
+### 1. Download the Project
+First, grab a copy of this app and install the necessary pieces:
 ```bash
 git clone https://github.com/Yatha04/CrossPlay.git
 cd CrossPlay
 pip install -r requirements.txt
 ```
 
-### 2. Configure environment
+### 2. Set Up Your Secret Keys
+Set up your credentials in `.env`.
 
+Copy the example settings file to create your own:
 ```bash
 cp .env.example .env
 ```
 
-Fill in your `.env`:
+Open the new `.env` file and fill in your details:
+- **Spotify Details:** Create an app on the [Spotify Developer Dashboard](https://developer.spotify.com/) to get your `Client ID` and `Client Secret`.
+- **Playlist IDs:** The unique links of the playlists you want to sync.
 
-| Variable | Description |
-|---|---|
-| `SPOTIFY_CLIENT_ID` | From your Spotify Developer app |
-| `SPOTIFY_CLIENT_SECRET` | From your Spotify Developer app |
-| `SPOTIFY_REDIRECT_URI` | Must match your Spotify app settings (default: `http://localhost:8888/callback`) |
-| `SPOTIFY_PLAYLIST_ID` | Target Spotify playlist ID |
-| `YT_OAUTH_JSON` | Base64-encoded oauth.json (see step 3) |
-| `YOUTUBE_PLAYLIST_ID` | Target YouTube Music playlist ID |
-| `DATABASE_PATH` | SQLite database path (default: `sync.db`) |
-| `POLL_INTERVAL_SECONDS` | How often to check for changes (default: `180`) |
-| `FUZZY_MATCH_THRESHOLD` | Minimum fuzzy match score 0-100 (default: `85`) |
-
-### 3. Authenticate YouTube Music
-
+### 3. Connect to YouTube Music
+Run this command to allow the app to talk to your YouTube Music account:
 ```bash
 python -m ytmusicapi oauth
 ```
+A browser window will open. Sign in with your Google account. This will create a tiny file called `oauth.json`.
 
-This opens a browser for Google OAuth. Once complete, it generates `oauth.json`. Base64-encode it and set `YT_OAUTH_JSON`:
+*(Note: The app needs this file converted into text format called Base64. You can convert it and paste the text into your `.env` file under `YT_OAUTH_JSON`.)*
 
-```bash
-# Linux/macOS
-base64 -i oauth.json
-
-# Windows (PowerShell)
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("oauth.json"))
-```
-
-### 4. Run
-
+### 4. Start the Magic!
+Now, bring the app to life:
 ```bash
 python main.py
 ```
 
-The service starts on port 8888. On first run:
+Finally, open your web browser and go to this link to connect your Spotify account:
+👉 `http://localhost:8888/auth/spotify`
 
-1. Visit `http://localhost:8888/auth/spotify` to connect Spotify
-2. YouTube Music auth was handled in step 3 (or POST to `/auth/youtube/callback`)
-3. Sync begins automatically on a 3-minute interval
+**That's it! 🎉** Your playlists will now automatically check for new songs every 3 minutes.
 
-## API Endpoints
+---
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/auth/spotify` | Redirects to Spotify OAuth |
-| GET | `/auth/spotify/callback` | Handles Spotify OAuth callback |
-| GET | `/auth/youtube` | Returns YouTube Music auth instructions |
-| POST | `/auth/youtube/callback` | Accepts base64-encoded oauth.json |
-| GET | `/health` | Service health: token status, poll age, failure count |
-
-## Running Tests
-
-```bash
-pytest tests/ -v
-```
-
-206 tests across all modules: config, database, normalization, matching, polling, writing, sync engine, API routes, and main entry point.
-
-## Project Structure
-
-```
-├── main.py              # Entry point: FastAPI + APScheduler
-├── config.py            # Environment variable loader
-├── api/routes.py        # OAuth callbacks + health check
-├── auth/
-│   ├── spotify_auth.py  # PKCE auth flow + token refresh
-│   └── youtube_auth.py  # ytmusicapi OAuth wrapper
-├── sync/
-│   ├── engine.py        # Orchestrates Poller → Matcher → Writer
-│   ├── poller.py        # Playlist change detection
-│   ├── matcher.py       # 5-tier cross-platform song matching
-│   └── writer.py        # Writes tracks with retry logic
-├── db/
-│   ├── models.py        # SQLite schema definitions
-│   ├── migrations.py    # Idempotent table creation
-│   └── queries.py       # CRUD operations + dedup logic
-├── utils/
-│   ├── normalize.py     # Title/artist string normalization
-│   └── logging.py       # Structured logging
-└── tests/               # 206 tests
-```
-
-## Tech Stack
-
-Python 3.11+ · FastAPI · APScheduler · spotipy (Spotify PKCE) · ytmusicapi (YouTube Music) · SQLite · thefuzz (fuzzy matching)
+### How I built this:
+- I used FastAPI and SQLite to build the backend, so its fast and lightweight. 
+- It uses a 5-step search system to find the best match for a song, and it uses a 3-step system to verify the match. 
+- You can run 'pytest tests/ -v' to check all 206 automated tests!
