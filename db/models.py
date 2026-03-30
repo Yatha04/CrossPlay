@@ -60,11 +60,48 @@ CREATE TABLE IF NOT EXISTS playlist_state (
 );
 """
 
+MIGRATION_JOBS_TABLE = """
+CREATE TABLE IF NOT EXISTS migration_jobs (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_platform         TEXT NOT NULL,
+    source_playlist_id      TEXT NOT NULL,
+    source_playlist_name    TEXT,
+    target_platform         TEXT NOT NULL,
+    target_playlist_id      TEXT,
+    status                  TEXT DEFAULT 'pending',
+    total_tracks            INTEGER DEFAULT 0,
+    matched_tracks          INTEGER DEFAULT 0,
+    failed_tracks           INTEGER DEFAULT 0,
+    created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
+    completed_at            DATETIME
+);
+"""
+
+MIGRATION_TRACKS_TABLE = """
+CREATE TABLE IF NOT EXISTS migration_tracks (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id              INTEGER NOT NULL,
+    source_track_id     TEXT NOT NULL,
+    source_title        TEXT,
+    source_artist       TEXT,
+    target_track_id     TEXT,
+    match_method        TEXT,
+    match_score         REAL,
+    status              TEXT DEFAULT 'pending',
+    error_message       TEXT,
+    FOREIGN KEY (job_id) REFERENCES migration_jobs(id)
+);
+"""
+
 INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_sync_source ON sync_log(source_platform, source_track_id);",
     "CREATE INDEX IF NOT EXISTS idx_sync_target ON sync_log(target_platform, target_track_id);",
     "CREATE INDEX IF NOT EXISTS idx_sync_isrc ON sync_log(isrc);",
     "CREATE INDEX IF NOT EXISTS idx_cache_lookup ON song_cache(platform, track_id);",
+    "CREATE INDEX IF NOT EXISTS idx_migration_tracks_job ON migration_tracks(job_id);",
 ]
 
-ALL_TABLES = [AUTH_TOKENS_TABLE, SYNC_LOG_TABLE, SONG_CACHE_TABLE, PLAYLIST_STATE_TABLE]
+ALL_TABLES = [
+    AUTH_TOKENS_TABLE, SYNC_LOG_TABLE, SONG_CACHE_TABLE, PLAYLIST_STATE_TABLE,
+    MIGRATION_JOBS_TABLE, MIGRATION_TRACKS_TABLE,
+]

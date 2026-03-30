@@ -1,4 +1,4 @@
-"""FastAPI routes — OAuth callbacks for both platforms + health check."""
+"""FastAPI routes — OAuth callbacks for both platforms + health check + migration."""
 
 import base64
 from datetime import datetime, timezone
@@ -6,9 +6,14 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from auth.spotify_auth import build_auth_manager, store_spotify_token
-from auth.youtube_auth import store_youtube_token
-from db.queries import get_auth_token, get_failed_syncs, get_playlist_state
+from auth.spotify_auth import build_auth_manager, store_spotify_token, get_spotify_client
+from auth.youtube_auth import store_youtube_token, get_ytmusic_client
+from db.queries import (
+    get_auth_token, get_failed_syncs, get_playlist_state,
+    get_migration_job, get_migration_jobs, get_migration_tracks,
+)
+from migrate.fetcher import parse_playlist_url
+from migrate.migrator import run_migration_async
 from utils.logging import get_logger
 
 log = get_logger("routes")
@@ -191,3 +196,176 @@ def health(request: Request):
         },
         "recent_failures": recent_failures,
     })
+
+
+# ---------------------------------------------------------------------------
+# Playlist migration
+# ---------------------------------------------------------------------------
+
+@router.post("/migrate")
+async def start_migration(request: Request):
+    """Start a playlist migration from a public playlist to the user's account.
+
+    Body: {"source_url": "<playlist URL or ID>", "target_platform": "spotify" | "youtube_music"}
+    """
+    cfg = request.app.state.config
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"status": "error", "detail": "Invalid JSON body"},
+            status_code=400,
+        )
+
+    source_url = body.get("source_url", "").strip()
+    target_platform = body.get("target_platform", "").strip().lower()
+
+    if not source_url:
+        return JSONResponse(
+            {"status": "error", "detail": "Missing source_url"},
+            status_code=400,
+        )
+    if target_platform not in ("spotify", "youtube_music"):
+        return JSONResponse(
+            {"status": "error", "detail": "target_platform must be 'spotify' or 'youtube_music'"},
+            status_code=400,
+        )
+
+    # Validate source URL format
+    try:
+        source_platform, _ = parse_playlist_url(source_url)
+    except ValueError as e:
+        return JSONResponse(
+            {"status": "error", "detail": str(e)},
+            status_code=400,
+        )
+
+    if source_platform == target_platform:
+        return JSONResponse(
+            {"status": "error", "detail": "Source and target platforms must be different"},
+            status_code=400,
+        )
+
+    # Verify target platform is authenticated
+    if target_platform == "spotify":
+        sp = get_spotify_client(
+            cfg.spotify_client_id, cfg.spotify_redirect_uri, cfg.database_path,
+        )
+        if not sp:
+            return JSONResponse(
+                {"status": "error", "detail": "Spotify not authenticated. Visit /auth/spotify first."},
+                status_code=401,
+            )
+        yt = None  # not needed as target
+    else:
+        yt = get_ytmusic_client(cfg.database_path, yt_oauth_json_b64=cfg.yt_oauth_json)
+        if not yt:
+            return JSONResponse(
+                {"status": "error", "detail": "YouTube Music not authenticated. Set up OAuth first."},
+                status_code=401,
+            )
+        sp = None  # not needed as target
+
+    # For migration we may also need the other client for searching
+    if sp is None:
+        sp = get_spotify_client(
+            cfg.spotify_client_id, cfg.spotify_redirect_uri, cfg.database_path,
+        )
+    if yt is None:
+        yt = get_ytmusic_client(cfg.database_path, yt_oauth_json_b64=cfg.yt_oauth_json)
+
+    try:
+        job_id = run_migration_async(
+            source_url=source_url,
+            target_platform=target_platform,
+            sp=sp,
+            yt=yt,
+            db_path=cfg.database_path,
+            client_id=cfg.spotify_client_id,
+            client_secret=cfg.spotify_client_secret,
+            fuzzy_threshold=cfg.fuzzy_match_threshold,
+        )
+    except ValueError as e:
+        return JSONResponse(
+            {"status": "error", "detail": str(e)},
+            status_code=400,
+        )
+
+    log.info("Migration %d started: %s → %s", job_id, source_url, target_platform)
+    return JSONResponse(
+        {"status": "started", "job_id": job_id, "message": "Migration started in background."},
+        status_code=202,
+    )
+
+
+@router.get("/migrate/history")
+def migration_history(request: Request, limit: int = Query(20, ge=1, le=100)):
+    """List recent migration jobs."""
+    cfg = request.app.state.config
+    jobs = get_migration_jobs(cfg.database_path, limit=limit)
+
+    return JSONResponse({
+        "jobs": [
+            {
+                "id": j["id"],
+                "source_platform": j["source_platform"],
+                "source_playlist_name": j["source_playlist_name"],
+                "target_platform": j["target_platform"],
+                "status": j["status"],
+                "total_tracks": j["total_tracks"],
+                "matched_tracks": j["matched_tracks"],
+                "failed_tracks": j["failed_tracks"],
+                "created_at": j["created_at"],
+                "completed_at": j["completed_at"],
+            }
+            for j in jobs
+        ],
+    })
+
+
+@router.get("/migrate/{job_id}")
+def migration_status(job_id: int, request: Request):
+    """Return the current status and track-level results for a migration job."""
+    cfg = request.app.state.config
+    job = get_migration_job(cfg.database_path, job_id)
+
+    if not job:
+        return JSONResponse(
+            {"status": "error", "detail": f"Migration job {job_id} not found"},
+            status_code=404,
+        )
+
+    tracks = get_migration_tracks(cfg.database_path, job_id)
+    progress_pct = 0
+    if job["total_tracks"] > 0:
+        processed = job["matched_tracks"] + job["failed_tracks"]
+        progress_pct = round(processed / job["total_tracks"] * 100, 1)
+
+    return JSONResponse({
+        "job_id": job["id"],
+        "status": job["status"],
+        "source_platform": job["source_platform"],
+        "source_playlist_name": job["source_playlist_name"],
+        "target_platform": job["target_platform"],
+        "target_playlist_id": job["target_playlist_id"],
+        "total_tracks": job["total_tracks"],
+        "matched_tracks": job["matched_tracks"],
+        "failed_tracks": job["failed_tracks"],
+        "progress_pct": progress_pct,
+        "created_at": job["created_at"],
+        "completed_at": job["completed_at"],
+        "tracks": [
+            {
+                "source_title": t["source_title"],
+                "source_artist": t["source_artist"],
+                "target_track_id": t["target_track_id"],
+                "match_method": t["match_method"],
+                "match_score": t["match_score"],
+                "status": t["status"],
+                "error": t["error_message"],
+            }
+            for t in tracks
+        ],
+    })
+

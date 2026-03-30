@@ -4,7 +4,7 @@ import time
 from datetime import datetime, timezone
 
 import spotipy
-from spotipy.oauth2 import SpotifyPKCE
+from spotipy.oauth2 import SpotifyPKCE, SpotifyClientCredentials
 
 from db.queries import upsert_auth_token, get_auth_token
 from utils.logging import get_logger
@@ -12,6 +12,18 @@ from utils.logging import get_logger
 log = get_logger("spotify_auth")
 
 SCOPES = "playlist-read-private playlist-modify-public playlist-modify-private"
+
+
+def get_spotify_client_credentials(client_id: str, client_secret: str) -> spotipy.Spotify:
+    """Return a Spotify client using Client Credentials (app-level, no user login).
+
+    This client can read any public playlist but cannot modify user playlists.
+    """
+    auth_manager = SpotifyClientCredentials(
+        client_id=client_id,
+        client_secret=client_secret,
+    )
+    return spotipy.Spotify(auth_manager=auth_manager)
 
 
 def build_auth_manager(

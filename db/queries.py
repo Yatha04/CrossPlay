@@ -246,3 +246,157 @@ def get_playlist_state(db_path: str, platform: str, playlist_id: str) -> dict | 
         return result
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# migration_jobs
+# ---------------------------------------------------------------------------
+
+def create_migration_job(
+    db_path: str,
+    source_platform: str,
+    source_playlist_id: str,
+    source_playlist_name: str,
+    target_platform: str,
+    total_tracks: int = 0,
+) -> int:
+    """Create a migration job and return its ID."""
+    conn = _connect(db_path)
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO migration_jobs
+                (source_platform, source_playlist_id, source_playlist_name,
+                 target_platform, total_tracks)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (source_platform, source_playlist_id, source_playlist_name,
+             target_platform, total_tracks),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def update_migration_job(
+    db_path: str,
+    job_id: int,
+    status: str | None = None,
+    target_playlist_id: str | None = None,
+    matched_tracks: int | None = None,
+    failed_tracks: int | None = None,
+    source_playlist_name: str | None = None,
+    total_tracks: int | None = None,
+) -> None:
+    """Update fields on a migration job. Only non-None values are updated."""
+    fields: list[str] = []
+    values: list[Any] = []
+
+    if status is not None:
+        fields.append("status = ?")
+        values.append(status)
+        if status == "completed":
+            fields.append("completed_at = CURRENT_TIMESTAMP")
+    if target_playlist_id is not None:
+        fields.append("target_playlist_id = ?")
+        values.append(target_playlist_id)
+    if matched_tracks is not None:
+        fields.append("matched_tracks = ?")
+        values.append(matched_tracks)
+    if failed_tracks is not None:
+        fields.append("failed_tracks = ?")
+        values.append(failed_tracks)
+    if source_playlist_name is not None:
+        fields.append("source_playlist_name = ?")
+        values.append(source_playlist_name)
+    if total_tracks is not None:
+        fields.append("total_tracks = ?")
+        values.append(total_tracks)
+
+    if not fields:
+        return
+
+    values.append(job_id)
+    conn = _connect(db_path)
+    try:
+        conn.execute(
+            f"UPDATE migration_jobs SET {', '.join(fields)} WHERE id = ?",
+            values,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_migration_job(db_path: str, job_id: int) -> dict | None:
+    """Return a migration job as a dict, or None."""
+    conn = _connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM migration_jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_migration_jobs(db_path: str, limit: int = 20) -> list[dict]:
+    """Return recent migration jobs, newest first."""
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM migration_jobs ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# migration_tracks
+# ---------------------------------------------------------------------------
+
+def insert_migration_track(
+    db_path: str,
+    job_id: int,
+    source_track_id: str,
+    source_title: str | None = None,
+    source_artist: str | None = None,
+    target_track_id: str | None = None,
+    match_method: str | None = None,
+    match_score: float | None = None,
+    status: str = "pending",
+    error_message: str | None = None,
+) -> int:
+    conn = _connect(db_path)
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO migration_tracks
+                (job_id, source_track_id, source_title, source_artist,
+                 target_track_id, match_method, match_score, status, error_message)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (job_id, source_track_id, source_title, source_artist,
+             target_track_id, match_method, match_score, status, error_message),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def get_migration_tracks(db_path: str, job_id: int) -> list[dict]:
+    """Return all tracks for a migration job."""
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM migration_tracks WHERE job_id = ? ORDER BY id",
+            (job_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
